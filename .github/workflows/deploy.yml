@@ -20,9 +20,15 @@ jobs:
         password: ${{ secrets.FTP_PASSWORD }}
         port: 21
         protocol: ftp
+        
+        # ⏱️ 1 ORAS NA TIMEOUT (3,600,000 milliseconds)
+        # Para kahit gaano kabagal, hindi maiiwan / mapuputol
+        timeout: 3600000 
+        
         local-dir: ./
         server-dir: /public_html/
-        timeout: 600000 # 10 minuto bago mag-timeout
+        
+        # I-e-exclude lang ang mga system files, LAHAT ng images at code isasama
         exclude: |
           **/.git*
           **/.git*/**
@@ -34,13 +40,3 @@ jobs:
           **/.gitignore
           **/.DS_Store
           **/Thumbs.db
-          
-          # I-exclude ang malalaking static assets
-          Code Geass/**
-          Funny Memes/**
-          GIFs/**
-          Gundam Images/**
-          Mario Wallpaper/**
-          Tools and Guide/**
-          Transformers Images/**
-          Valorants/**
