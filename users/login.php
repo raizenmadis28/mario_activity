@@ -1,126 +1,64 @@
 <?php
-// users/login.php
-session_start();
+require_once __DIR__ . '/../includes/layout.php';
+require_guest('/index.php');
 
-// Database Connection
-$host = "localhost";
-$user = "root";
-$password = "@RBmadis28"; 
-$dbname = "Mario_Activity";
-
-$connection = @new mysqli($host, $user, $password, $dbname);
-if ($connection->connect_error) {
-    die("Connection Failed: " . $connection->connect_error);
-}
-
-$error_type = ""; 
-$error_message = "";
-$redirect_to_index = false;
-
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = trim($_POST['username']);
-    $password_input = $_POST['password'];
-
-    if (empty($username) || empty($password_input)) {
-        $error_type = "empty";
-        $error_message = "OHHH MAMAMIAA!! GAME-OVERR!! YOU LOST A 1UP Life na Punan ang lahat ng espasyo para makapag-sign in!";
-    } else {
-        $stmt = $connection->prepare("SELECT id, username, password, role FROM users WHERE username = ? OR email = ?");
-        $stmt->bind_param("ss", $username, $username);
+$error = '';
+$error_type = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $conn = db();
+    $u = trim($_POST['username'] ?? '');
+    $p = $_POST['password'] ?? '';
+    if ($u === '' || $p === '') { $error = 'Punan lahat ng fields!'; $error_type = 'empty'; }
+    else {
+        $stmt = $conn->prepare("SELECT id,username,password,email,role FROM users WHERE username=? OR email=?");
+        $stmt->bind_param("ss", $u, $u);
         $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($row = $result->fetch_assoc()) {
-            if (password_verify($password_input, $row['password'])) {
-                $_SESSION['user_id'] = $row['id'];
-                $_SESSION['username'] = $row['username'];
-                $_SESSION['role'] = $row['role'];
-                
-                $error_type = "success";
-                $error_message = "YEHEYY!! Nakapasok ka na sa Mario Inventory System!";
-                $redirect_to_index = true;
-            } else {
-                $error_type = "wrong";
-                $error_message = "Gwahahaha! Maling password, hindi mo maloloko ang kaharian ko!";
-            }
-        } else {
-            $error_type = "wrong";
-            $error_message = "Gwahahaha! Walang ganyang Username o Email sa aming listahan!";
-        }
+        $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
+        if ($row && password_verify($p, $row['password'])) {
+            session_regenerate_id(true);
+            $_SESSION['user_id'] = (int)$row['id'];
+            $_SESSION['username'] = $row['username'];
+            $_SESSION['email'] = $row['email'];
+            $_SESSION['role'] = $row['role'];
+            unset($_SESSION['redirect_after_login']); // 🧹 clear stale redirect
+            toast('YEHEYY!! Welcome back, ' . $row['username'] . '!', 'success');
+            redirect('/index.php'); // 🏠 always land on dashboard
+        }
+        $error = 'Gwahahaha! Maling password o username!'; $error_type = 'wrong';
     }
 }
+render_head('Sign In', '/Mario Wallpaper/mario-super-mario-bros-3-wallpaper-preview.jpg');
 ?>
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Sign In - Mario Activity</title>
-    <?php if ($redirect_to_index): ?>
-        <meta http-equiv="refresh" content="2;url=../index.php">
-    <?php endif; ?>
-</head>
-<body style="margin: 0; font-family: Arial, sans-serif; display: flex; flex-direction: column; min-height: 100vh;">
-
-<?php include '../header.php'; ?>
-
-<div style="flex: 1; background: url('../Mario Wallpaper/mario-super-mario-bros-3-wallpaper-preview.jpg') no-repeat center center fixed; background-size: cover; display: flex; justify-content: center; align-items: center; padding: 20px;">
-    <div style="background: rgba(42, 42, 80, 0.95); padding: 30px; border-radius: 8px; border: 4px solid #f3cd00; max-width: 450px; width: 100%; text-align: center; color: #fff;">
-        
-        <h2 style="color: #f3cd00; margin-top: 0;">🔥 Sign In</h2>
-
-        <?php if (!empty($error_type)): ?>
-            <?php 
-                $bg_color = ($error_type === 'success') ? 'rgba(46, 125, 50, 0.9)' : 'rgba(198, 40, 40, 0.9)';
-            ?>
-            <div style="background: <?php echo $bg_color; ?>; border: 2px solid #ffeb3b; color: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; text-align: left;">
-                <?php if ($error_type === 'empty'): ?>
-                    <img src="../Funny Memes/Mario-Gameover-Pic.png" alt="Mario Game Over" style="width: 45px; height: auto; flex-shrink: 0;" onerror="this.style.display='none'">
-                <?php elseif ($error_type === 'wrong'): ?>
-                    <img src="../Funny Memes/Bowser.png" alt="Bowser Laugh" style="width: 45px; height: auto; flex-shrink: 0;" onerror="this.style.display='none'">
-                <?php elseif ($error_type === 'success'): ?>
-                    <img src="../Tools and Guide/Luigi-Bros.png" alt="Luigi Success" style="width: 45px; height: auto; flex-shrink: 0;" onerror="this.style.display='none'">
-                <?php endif; ?>
-                
-                <div style="font-weight: bold; font-size: 13px; line-height: 1.4;">
-                    <?php echo htmlspecialchars($error_message); ?>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <?php if (!$redirect_to_index): ?>
-            <form method="POST" style="text-align: left;">
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; margin-bottom: 5px; color: #ffeb3b;">Username or Email:</label>
-                    <input type="text" name="username" style="width: 100%; padding: 10px; background: #1a1a2e; color: #fff; border: 2px solid #f3cd00; border-radius: 4px;" value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>">
-                </div>
-
-                <div style="margin-bottom: 20px;">
-                    <label style="display: block; margin-bottom: 5px; color: #ffeb3b;">Password:</label>
-                    <input type="password" name="password" style="width: 100%; padding: 10px; background: #1a1a2e; color: #fff; border: 2px solid #f3cd00; border-radius: 4px;">
-                </div>
-
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <button type="submit" style="background: none; border: none; cursor: pointer; padding: 0;" title="Pumasok sa Green Pipe!">
-                        <img src="../Tools and Guide/Green pipe.jpg" alt="Green Pipe Login" style="width: 90px; height: auto; display: block; margin: 0 auto; border-radius: 4px;" onerror="this.onerror=null; this.src='../green-pipe.png';">
-                    </button>
-                    <div style="font-size: 12px; color: #ffeb3b; margin-top: 5px; font-family: monospace;">I-click ang Green Pipe para mag-login!</div>
-                </div>
-
-                <div style="display: flex; justify-content: space-between; border-top: 1px solid #444; padding-top: 15px; font-size: 13px;">
-                    <a href="register.php" style="color: #ffeb3b; text-decoration: none; font-weight: bold;">🎮 Register account</a>
-                    <a href="forgot_password.php" style="color: #ffeb3b; text-decoration: none; font-weight: bold;">❓ Forgot Password?</a>
-                </div>
-            </form>
-        <?php else: ?>
-            <div style="font-size: 14px; color: #ffeb3b; font-family: monospace;">Ikinakarga ang Mario Inventory System... Sandali lamang!</div>
-        <?php endif; ?>
-
-    </div>
+<div class="flex-1 flex items-center justify-center p-4">
+<div class="w-full max-w-md bg-slate-800/95 rounded-2xl shadow-mario border-4 border-yellow-400 overflow-hidden my-6">
+<div class="bg-gradient-to-r from-red-500 to-orange-400 p-6 text-center">
+<h1 class="text-3xl font-bold text-white drop-shadow-lg">🔥 Sign In 🔥</h1></div>
+<form method="POST" class="p-6 space-y-4 text-white">
+<?php if ($error): ?>
+<div class="bg-red-700/90 border-2 border-yellow-400 text-white px-4 py-3 rounded-lg font-semibold flex items-center gap-3">
+<?php if ($error_type === 'empty'): ?>
+<img src="/Funny Memes/Mario-Gameover-Pic.png" alt="Mario Game Over" class="w-12 h-auto flex-shrink-0" onerror="this.style.display='none'">
+<?php else: ?>
+<img src="/Funny Memes/Bowser.png" alt="Bowser" class="w-12 h-auto flex-shrink-0" onerror="this.style.display='none'">
+<?php endif; ?>
+<span class="text-sm"><?= e($error) ?></span>
 </div>
-
-<?php include '../footer.php'; ?>
-
-</body>
-</html>
+<?php endif; ?>
+<div><label class="block font-bold text-yellow-300 mb-1">Username or Email</label>
+<input type="text" name="username" value="<?= e($_POST['username'] ?? '') ?>" required autocomplete="username"
+    class="w-full px-4 py-3 bg-slate-900 text-white border-2 border-yellow-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-300"></div>
+<div><label class="block font-bold text-yellow-300 mb-1">Password</label>
+<input type="password" name="password" required autocomplete="current-password"
+    class="w-full px-4 py-3 bg-slate-900 text-white border-2 border-yellow-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-300"></div>
+<div class="text-center">
+<button type="submit" class="cursor-pointer transition-transform hover:scale-110" title="Pumasok sa Green Pipe!">
+<img src="/Tools and Guide/Green pipe.jpg" alt="Green Pipe Login" class="w-24 h-auto mx-auto rounded-lg border-2 border-white shadow-lg" onerror="this.style.display='none'">
+</button>
+<p class="text-yellow-300 text-xs mt-2 font-mono">I-click ang Green Pipe para mag-login!</p>
+</div>
+<div class="flex justify-between text-sm pt-2 border-t border-slate-600">
+<a href="register.php" class="text-yellow-300 font-semibold hover:underline">🎮 Register</a>
+<a href="forgot_password.php" class="text-pink-300 font-semibold hover:underline">❓ Forgot Password?</a>
+</div></form></div></div>
+<?php render_footer(); ?>

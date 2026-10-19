@@ -1,147 +1,183 @@
 <?php
-// users/verifications.php
-session_start();
+require_once __DIR__ . '/../includes/layout.php';
+require_once __DIR__ . '/../includes/ciphermail.php';
+require_guest('/index.php');
 
-$message = "";
-$message_type = "";
-
-if (!isset($_SESSION['verification_code'])) {
-    header("Location: forgot_password.php");
-    exit();
+if (!isset($_SESSION['verification_code']) || !isset($_SESSION['reset_email'])) {
+    redirect('/users/forgot_password.php');
 }
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $input_code = trim($_POST['verification_code']);
-    $current_time = time();
-    $code_time = $_SESSION['code_time'] ?? 0;
+$message = '';
+$message_type = '';
 
-    // Suriin kung lumampas na sa 2 minuto (120 segundo) ang expiration sa server side
-    if (($current_time - $code_time) > 120) {
-        $message = "AHAHAHAHAHA!! EXPIRE ANG LINK NG VERIFICATION CODE MO INTAYIN MO NA LANG NG 2 Minutes Bago ka magverify ng CODE!";
-        $message_type = "expire";
-    } elseif ($input_code == $_SESSION['verification_code']) {
-        // Tagumpay
-        $_SESSION['verified_success'] = true;
-        $message = "YEHEYY!! MAARING PUMUNTA KA SA RESET PASSWORD!";
-        $message_type = "success";
+// ============ RESEND HANDLER ============
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'resend') {
+    $remaining = max(0, (int)($_SESSION['code_expires_at'] ?? 0) - time());
+
+    if ($remaining > 0) {
+        $message = "Hintayin pa ang {$remaining}s bago mag-resend.";
+        $message_type = 'error';
     } else {
-        $message = "OHH MAAMAA MIAA!! Maling Verification Code! Subukan muli!";
-        $message_type = "error";
+        $newCode = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $_SESSION['verification_code'] = $newCode;
+        $_SESSION['code_expires_at']   = time() + 120;
+        $_SESSION['otp_attempts']      = 0;
+
+        // Send lang kung existing user — silent kung wala
+        if (!empty($_SESSION['user_exists'])) {
+            send_otp_email($_SESSION['reset_email'], $_SESSION['reset_username'] ?? '', $newCode);
+        }
+
+        // Palaging parehong toast
+        toast('📧 Bagong OTP code naipadala. Tignan ang Inbox, Spam, at Junk folder.', 'info');
+        redirect('/users/verifications.php');
     }
 }
+
+// ============ VERIFY HANDLER ============
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'verify') {
+    $input = trim($_POST['verification_code'] ?? '');
+    $expiresAt = (int)($_SESSION['code_expires_at'] ?? 0);
+    $now = time();
+
+    if ($now >= $expiresAt) {
+        $message = 'Expired na ang code. I-click ang Resend para makakuha ng bago.';
+        $message_type = 'expire';
+    } elseif ($input === '') {
+        $message = 'Ilagay ang 6-digit code.';
+        $message_type = 'error';
+    } elseif (!hash_equals((string)$_SESSION['verification_code'], $input)) {
+        // Maling code
+        $_SESSION['otp_attempts'] = ((int)($_SESSION['otp_attempts'] ?? 0)) + 1;
+        if ($_SESSION['otp_attempts'] >= 5) {
+            unset($_SESSION['verification_code'], $_SESSION['code_expires_at']);
+            $message = 'Sobra na sa 5 attempts. Bumalik sa Forgot Password at mag-request muli.';
+            $message_type = 'expire';
+        } else {
+            $left = 5 - $_SESSION['otp_attempts'];
+            $message = "Maling code. Natitira pang attempts: {$left}";
+            $message_type = 'error';
+        }
+    } elseif (empty($_SESSION['user_exists'])) {
+        // Tama ang code PERO wala ang email sa DB.
+        // Impossible ma-guess ito ng attacker (1/1M), at kahit tama, hindi natin ipapasa.
+        $_SESSION['otp_attempts']++;
+        $message = 'Maling code. Subukan muli.';
+        $message_type = 'error';
+    } else {
+        // ✅ SUCCESS — tama ang code at existing ang user
+        $_SESSION['verified_success'] = true;
+        toast('✅ Verified! Mag-set na ng bagong password.', 'success');
+        redirect('/users/reset_password.php');
+    }
+}
+
+// Recompute timer — persists across refresh
+$remaining = max(0, (int)($_SESSION['code_expires_at'] ?? 0) - time());
+$apiStatus = $_SESSION['api_status'] ?? '';
+$apiError  = $_SESSION['api_error'] ?? '';
+$showDebugCode = ($apiStatus === 'failed') || isset($_GET['debug']);
+$expired = ($remaining <= 0);
+
+render_head('Verification Code', '/Mario Wallpaper/Mario 3D Land.jpeg');
 ?>
+<div class="flex-1 flex items-center justify-center p-4">
+<div class="w-full max-w-lg bg-slate-800/95 rounded-2xl shadow-mario border-4 border-yellow-400 p-8 text-white my-6">
 
-<!DOCTYPE html>
-<html lang="tl">
-<head>
-    <meta charset="UTF-8">
-    <title>Verification Code - Mario Activity</title>
-    <script>
-        // JavaScript 2-Minute Timer para sa Expiration
-        document.addEventListener("DOMContentLoaded", function() {
-            var timeLeft = 120; // 2 minuto sa segundo
-            var timerDisplay = document.getElementById("timer");
-            var formContainer = document.getElementById("verification-form-container");
-            var bowserAlert = document.getElementById("bowser-alert");
+<h2 class="text-2xl font-bold text-yellow-300 text-center mb-1">🔐 Verification</h2>
+<p class="text-center text-gray-300 text-sm mb-2">Naipadala sa <strong class="text-yellow-200"><?= e($_SESSION['reset_email']) ?></strong></p>
+<p class="text-center text-xs text-gray-400 mb-4">💡 Hindi mo makita? Tignan ang <strong class="text-yellow-300">Spam / Junk folder</strong></p>
 
-            var countdown = setInterval(function() {
-                var minutes = Math.floor(timeLeft / 60);
-                var seconds = timeLeft % 60;
-                
-                seconds = seconds < 10 ? "0" + seconds : seconds;
-                if (timerDisplay) {
-                    timerDisplay.innerHTML = minutes + ":" + seconds;
-                }
+<?php if ($apiStatus === 'failed'): ?>
+<div class="bg-red-700/40 border-2 border-red-400 text-red-100 px-4 py-2 rounded-lg text-xs mb-4">
+⚠️ <strong>Email failed:</strong> <?= e($apiError) ?>
+<?php if ($showDebugCode): ?>
+<br><span class="text-yellow-300">🔧 <strong>Debug code:</strong> <span class="font-mono text-lg"><?= e($_SESSION['verification_code']) ?></span></span>
+<?php endif; ?>
+</div>
+<?php endif; ?>
 
-                if (timeLeft <= 0) {
-                    clearInterval(countdown);
-                    if (formContainer) {
-                        formContainer.style.display = "none";
-                    }
-                    if (bowserAlert) {
-                        bowserAlert.style.display = "block";
-                    }
-                }
-                timeLeft--;
-            }, 1000);
-        });
-    </script>
-</head>
-<body style="margin: 0; font-family: Arial, sans-serif; display: flex; flex-direction: column; min-height: 100vh;">
-
-<?php include('../header.php'); ?>
-
-<div style="flex: 1; background: url('../Mario Wallpaper/Mario 3D Land.jpeg') no-repeat center center fixed; background-size: cover; display: flex; justify-content: center; align-items: center; padding: 20px;">
-    <div style="background: rgba(42, 42, 80, 0.95); padding: 30px; border-radius: 8px; border: 4px solid #f3cd00; max-width: 550px; width: 100%; text-align: center; color: #fff;">
-        
-        <h2 style="color: #f3cd00; margin-top: 0;">🔐 RaizenMadis28 Verification Code</h2>
-        <p style="font-size: 14px; color: #ddd;">Tingnan ang iyong Simulated Gmail Inbox at ilagay ang Verification Numbers.</p>
-        
-        <!-- Timer Counter Display -->
-        <div style="margin-bottom: 15px; font-weight: bold; color: #ffeb3b; font-size: 16px;">
-            ⏳ Oras bago mag-expire: <span id="timer" style="color: #ff5555; font-size: 18px;">2:00</span>
-        </div>
-
-        <!-- Awtomatikong Bowser Jr Alert kapag lumipas ang 2 minuto -->
-        <div id="bowser-alert" style="display: none; margin-bottom: 20px; background: rgba(198, 40, 40, 0.4); padding: 15px; border-radius: 6px; border: 2px solid #c62828;">
-            <img src="../Funny Memes/bowser jr.png" alt="Bowser Jr" style="width: 90px; height: auto; border-radius: 6px; margin-bottom: 8px;">
-            <div style="font-weight: bold; color: #ff6b6b; font-size: 14px;">
-                AHAHAHAHAHA!! EXPIRE ANG LINK NG VERIFICATION CODE MO INTAYIN MO NA LANG NG 2 Minutes Bago ka magverify ng CODE!
-            </div>
-        </div>
-
-        <?php if ($message_type == 'expire'): ?>
-            <div style="margin-bottom: 20px; background: rgba(198, 40, 40, 0.4); padding: 15px; border-radius: 6px; border: 2px solid #c62828;">
-                <img src="../Funny Memes/bowser jr.png" alt="Bowser Jr" style="width: 90px; height: auto; border-radius: 6px; margin-bottom: 8px;">
-                <div style="font-weight: bold; color: #ff6b6b; font-size: 14px;">
-                    <?php echo $message; ?>
-                </div>
-            </div>
-        <?php elseif ($message_type == 'success'): ?>
-            <div style="margin-bottom: 20px; background: rgba(46, 125, 50, 0.4); padding: 15px; border-radius: 6px; border: 2px solid #2e7d32;">
-                <img src="../Tools and Guide/Luigi-Bros.png" alt="Luigi Success" style="width: 90px; height: auto; border-radius: 6px; margin-bottom: 8px;" onerror="this.onerror=null; this.src='../Luigi-Bros.png';">
-                <div style="font-weight: bold; color: #55ff55; font-size: 15px;">
-                    <?php echo $message; ?>
-                </div>
-            </div>
-            <div style="margin-top: 15px;">
-                <a href="Reset_Password.php" style="display: inline-block; background: #e52521; color: white; padding: 12px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 15px;">I-reset ang Password Na Ginamitan ng Mario 3D Land ➔</a>
-            </div>
-        <?php elseif ($message_type == 'error'): ?>
-            <div style="margin-bottom: 20px; background: rgba(198, 40, 40, 0.3); padding: 15px; border-radius: 6px; border: 2px solid #c62828;">
-                <img src="../Funny Memes/Mario Advance 4 Game-over.png" alt="Error" style="width: 80px; height: auto; margin-bottom: 8px;">
-                <div style="font-weight: bold; color: #ff5555; font-size: 14px;">
-                    <?php echo $message; ?>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($message_type != 'success'): ?>
-            <div id="verification-form-container">
-                <!-- Pagpapakita ng Mario sa pagsusumite kasama ang tamang path ng larawan -->
-                <div style="margin-bottom: 15px;">
-                    <img src="../Tools and Guide/Super-Mario.png" alt="Mario" style="width: 70px; height: auto;" onerror="this.onerror=null; this.src='../Super-Mario.png';">
-                    <p style="font-size: 12px; color: #ffeb3b; margin: 5px 0 0 0;">YAHOO!! YOUR INBOX HAS BEEN SENT! PLEASE DIRECT TO VERIFICATION CODE</p>
-                </div>
-
-                <form method="POST" style="text-align: left;">
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; color: #ffeb3b;">Please Fill in the Verification numbers:</label>
-                        <input type="text" name="verification_code" placeholder="Ilagay ang verification code" required style="width: 100%; padding: 10px; background: #1a1a2e; color: #fff; border: 2px solid #f3cd00; border-radius: 4px; box-sizing: border-box; text-align: center; font-size: 18px; letter-spacing: 2px;">
-                    </div>
-
-                    <button type="submit" style="width: 100%; background: #388e3c; color: white; padding: 12px; border: none; border-radius: 4px; font-weight: bold; font-size: 15px; cursor: pointer;">I-verify ang Code</button>
-                </form>
-            </div>
-        <?php endif; ?>
-
-        <div style="margin-top: 20px; text-align: center; border-top: 1px solid #444; padding-top: 15px;">
-            <a href="forgot_password.php" style="color: #ffeb3b; font-size: 14px; text-decoration: none; font-weight: bold;">⬅️ Bumalik sa Forgot Password</a>
-        </div>
-    </div>
+<!-- TIMER -->
+<div class="text-center mb-5">
+<div class="text-xs text-yellow-300 font-bold uppercase tracking-wider mb-1">⏳ Time remaining</div>
+<div id="timer" class="text-5xl font-mono font-bold <?= $expired ? 'text-gray-500' : 'text-red-400' ?> drop-shadow">
+<?= sprintf('%02d:%02d', intdiv($remaining, 60), $remaining % 60) ?>
+</div>
 </div>
 
-<?php include('../footer.php'); ?>
+<?php if ($message): ?>
+<div class="bg-red-700/90 border-2 border-yellow-400 text-white px-4 py-3 rounded-lg font-semibold mb-4 text-center text-sm">
+<?= e($message) ?>
+</div>
+<?php endif; ?>
 
-</body>
-</html>
+<!-- VERIFY FORM -->
+<form method="POST" id="verify-form" class="space-y-3" <?= $expired ? 'style="display:none"' : '' ?>>
+<input type="hidden" name="action" value="verify">
+<div>
+<label class="block font-bold text-yellow-300 mb-1 text-sm text-center">Ilagay ang 6-digit code</label>
+<input type="text" name="verification_code" maxlength="6" pattern="\d{6}" inputmode="numeric"
+    placeholder="••••••" autocomplete="one-time-code" required
+    class="w-full px-3 py-3 bg-slate-900 text-white border-2 border-yellow-400 rounded-lg text-center text-3xl tracking-[0.5em] font-mono">
+</div>
+<button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold border-2 border-yellow-400 transition">
+✅ Verify Code
+</button>
+</form>
+
+<!-- RESEND FORM -->
+<form method="POST" id="resend-form" class="space-y-3" <?= $expired ? '' : 'style="display:none"' ?>>
+<input type="hidden" name="action" value="resend">
+<div class="bg-red-900/40 border-2 border-red-400 px-4 py-3 rounded-lg text-sm text-center text-red-100">
+⌛ Expired na ang code. I-request ang bago para sa 2-minutong countdown ulit.
+</div>
+<button type="submit" class="w-full bg-yellow-500 hover:bg-yellow-600 text-black py-3 rounded-xl font-bold border-2 border-black transition">
+📧 Resend Code
+</button>
+</form>
+
+<div class="text-center text-sm pt-4 border-t border-slate-600 mt-5">
+<a href="forgot_password.php" class="text-yellow-300 font-bold hover:underline">⬅️ Bumalik sa Forgot Password</a>
+</div>
+</div></div>
+
+<script>
+const START_REMAINING = <?= (int)$remaining ?>;
+const START_TIME = Date.now();
+const timerEl = document.getElementById('timer');
+const verifyForm = document.getElementById('verify-form');
+const resendForm = document.getElementById('resend-form');
+let expiredShown = false;
+
+function fmt(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function tick() {
+    const elapsed = Math.floor((Date.now() - START_TIME) / 1000);
+    const rem = Math.max(0, START_REMAINING - elapsed);
+    timerEl.textContent = fmt(rem);
+    if (rem <= 0) {
+        if (!expiredShown) {
+            expiredShown = true;
+            verifyForm.style.display = 'none';
+            resendForm.style.display = 'block';
+            timerEl.classList.remove('text-red-400');
+            timerEl.classList.add('text-gray-500');
+        }
+        return;
+    }
+    setTimeout(tick, 250);
+}
+
+if (START_REMAINING > 0) {
+    setTimeout(tick, 250);
+} else {
+    expiredShown = true;
+    verifyForm.style.display = 'none';
+    resendForm.style.display = 'block';
+}
+</script>
+<?php render_footer(); ?>

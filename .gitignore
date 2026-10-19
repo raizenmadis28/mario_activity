@@ -1,0 +1,15 @@
+# DDEV local config (per-machine)
+.ddev/
+
+# Danger — contains DROP TABLE
+reset_db.php
+
+# User uploads (uncomment kung ayaw mo i-track)
+# uploads/*
+
+# OS/IDE junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
