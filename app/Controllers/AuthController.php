@@ -4,6 +4,7 @@ namespace App\Controllers;
 use App\Core\Controller;
 use App\Core\Auth;
 use App\Core\CipherMail;
+use App\Core\ImageUpload;
 use App\Models\User;
 
 class AuthController extends Controller
@@ -40,14 +41,14 @@ class AuthController extends Controller
         }
 
         $this->view('auth/login', [
-            'title' => 'Sign In',
-            'bg' => '/Mario Wallpaper/mario-super-mario-bros-3-wallpaper-preview.jpg',
-            'error' => $error,
+            'title'      => 'Sign In',
+            'bg'         => '/Mario Wallpaper/mario-super-mario-bros-3-wallpaper-preview.jpg',
+            'error'      => $error,
             'error_type' => $error_type,
         ]);
     }
 
-    // ============ REGISTER ============
+    // ============ REGISTER — puro CUSTOMER, LAHAT required ============
     public function register(): void
     {
         Auth::requireGuest('/index.php');
@@ -55,51 +56,67 @@ class AuthController extends Controller
         $error_type = '';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $u  = trim($_POST['username'] ?? '');
-            $em = trim($_POST['email'] ?? '');
-            $p  = $_POST['password'] ?? '';
-            $r  = $_POST['role'] ?? 'Customer';
+            $u      = trim($_POST['username'] ?? '');
+            $em     = trim($_POST['email'] ?? '');
+            $p      = $_POST['password'] ?? '';
+            $fullNm = trim($_POST['full_name'] ?? '');
+            $addr   = trim($_POST['address'] ?? '');
+            $role   = 'Customer';
 
-            if ($u === '' || $em === '' || $p === '') {
-                $error = 'OHHH!! MAAMMAAMIAA!! Punan lahat ng fields!';
+            $hasImage = isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPLOAD_ERR_OK;
+
+            if ($u === '' || $em === '' || $p === '' || $fullNm === '' || $addr === '' || !$hasImage) {
+                $error = 'OHHH!! MAAMMAAMIAA!! Punan LAHAT ng fields kasama ang profile picture!';
                 $error_type = 'gameover';
             } elseif (!filter_var($em, FILTER_VALIDATE_EMAIL)) {
-                $error = 'Hindi valid ang email.';
+                $error = 'Hindi valid ang email format.';
                 $error_type = 'gameover';
             } elseif (strlen($p) < 6) {
                 $error = 'Dapat 6+ characters ang password.';
                 $error_type = 'gameover';
             } else {
-                $model = new User();
-                if ($model->exists($u, $em)) {
-                    $error = 'GWAHAHAHA!! MERON NA USERNAME/EMAIL NA GINAMIT!';
-                    $error_type = 'bowser';
-                } else {
-                    $id = $model->create([
-                        'username' => $u,
-                        'email'    => $em,
-                        'password' => password_hash($p, PASSWORD_DEFAULT),
-                        'role'     => $r,
-                    ]);
-                    if ($id) {
-                        session_regenerate_id(true);
-                        $_SESSION['user_id']  = $id;
-                        $_SESSION['username'] = $u;
-                        $_SESSION['email']    = $em;
-                        $_SESSION['role']     = $r;
-                        toast('YEHEYY!! Registered na, ' . $u . '!', 'success');
-                        $this->redirect('/index.php');
-                    }
-                    $error = 'Registration failed.';
+                $img = ImageUpload::handle($_FILES['profile_image'], 'customers');
+
+                if ($img === '') {
+                    $error = 'Invalid image. JPG/PNG/WEBP lang, max 5MB.';
                     $error_type = 'gameover';
+                } else {
+                    $model = new User();
+                    if ($model->exists($u, $em)) {
+                        ImageUpload::delete($img);
+                        $error = 'GWAHAHAHA!! MERON NA USERNAME/EMAIL NA GINAMIT!';
+                        $error_type = 'bowser';
+                    } else {
+                        $id = $model->create([
+                            'username'      => $u,
+                            'email'         => $em,
+                            'password'      => password_hash($p, PASSWORD_DEFAULT),
+                            'role'          => $role,
+                            'full_name'     => $fullNm,
+                            'address'       => $addr,
+                            'profile_image' => $img,
+                        ]);
+                        if ($id) {
+                            session_regenerate_id(true);
+                            $_SESSION['user_id']  = $id;
+                            $_SESSION['username'] = $u;
+                            $_SESSION['email']    = $em;
+                            $_SESSION['role']     = $role;
+                            toast('YEHEYY!! Registered na bilang Customer, ' . $u . '!', 'success');
+                            $this->redirect('/index.php');
+                        }
+                        ImageUpload::delete($img);
+                        $error = 'Registration failed. Subukan muli.';
+                        $error_type = 'gameover';
+                    }
                 }
             }
         }
 
         $this->view('auth/register', [
-            'title' => 'Register',
-            'bg' => '/Mario Wallpaper/Mario-plays.png',
-            'error' => $error,
+            'title'      => 'Register',
+            'bg'         => '/Mario Wallpaper/Mario-plays.png',
+            'error'      => $error,
             'error_type' => $error_type,
         ]);
     }
@@ -144,7 +161,7 @@ class AuthController extends Controller
 
         $this->view('auth/forgot', [
             'title' => 'Forgot Password',
-            'bg' => '/Mario Wallpaper/mario-world-map.jpg',
+            'bg'    => '/Mario Wallpaper/mario-world-map.jpg',
             'error' => $error,
         ]);
     }
@@ -161,7 +178,6 @@ class AuthController extends Controller
         $message = '';
         $message_type = '';
 
-        // RESEND
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'resend') {
             $remaining = max(0, (int)($_SESSION['code_expires_at'] ?? 0) - time());
             if ($remaining > 0) {
@@ -180,7 +196,6 @@ class AuthController extends Controller
             }
         }
 
-        // VERIFY
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'verify') {
             $input = trim($_POST['verification_code'] ?? '');
             $expiresAt = (int)($_SESSION['code_expires_at'] ?? 0);
@@ -216,13 +231,13 @@ class AuthController extends Controller
 
         $remaining = max(0, (int)($_SESSION['code_expires_at'] ?? 0) - time());
         $this->view('auth/verify', [
-            'title' => 'Verification Code',
-            'bg' => '/Mario Wallpaper/Mario 3D Land.jpeg',
-            'message' => $message,
-            'message_type' => $message_type,
-            'remaining' => $remaining,
-            'api_status' => $_SESSION['api_status'] ?? '',
-            'api_error' => $_SESSION['api_error'] ?? '',
+            'title'           => 'Verification Code',
+            'bg'              => '/Mario Wallpaper/Mario 3D Land.jpeg',
+            'message'         => $message,
+            'message_type'    => $message_type,
+            'remaining'       => $remaining,
+            'api_status'      => $_SESSION['api_status'] ?? '',
+            'api_error'       => $_SESSION['api_error'] ?? '',
             'show_debug_code' => (($_SESSION['api_status'] ?? '') === 'failed') || isset($_GET['debug']),
         ]);
     }
@@ -280,14 +295,14 @@ class AuthController extends Controller
         }
 
         $this->view('auth/reset', [
-            'title' => 'Reset Password',
-            'bg' => '/SuperStar_Road.png',
-            'message' => $message,
+            'title'        => 'Reset Password',
+            'bg'           => '/Mario Wallpaper/SuperStar_Road.png',
+            'message'      => $message,
             'message_type' => $message_type,
         ]);
     }
 
-    // ============ EDIT USER ============
+    // ============ EDIT USER (with password change + avatar) ============
     public function edit(): void
     {
         Auth::requireLogin();
@@ -295,6 +310,7 @@ class AuthController extends Controller
         $current = Auth::user();
         $isAdmin = Auth::isAdmin();
 
+        // Guard: customer cannot edit other users
         if (!$isAdmin && $id !== (int)$current['id']) {
             $this->redirect('/index.php');
         }
@@ -310,36 +326,87 @@ class AuthController extends Controller
         $message_type = '';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $u = trim($_POST['username'] ?? '');
-            $em = trim($_POST['email'] ?? '');
-            $r = $isAdmin ? ($_POST['role'] ?? $user['role']) : $current['role'];
+            $u      = trim($_POST['username'] ?? '');
+            $em     = trim($_POST['email'] ?? '');
+            $r      = $isAdmin ? ($_POST['role'] ?? $user['role']) : $current['role'];
+            $fullNm = trim($_POST['full_name'] ?? '');
+            $addr   = trim($_POST['address'] ?? '');
+            $img    = $user['profile_image'] ?? '';
 
+            // Password change fields
+            $newPw      = $_POST['new_password'] ?? '';
+            $confPw     = $_POST['confirm_password'] ?? '';
+            $changePass = ($newPw !== '' || $confPw !== '');
+
+            // Optional new avatar
+            if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPLOAD_ERR_OK) {
+                $newImg = ImageUpload::handle($_FILES['profile_image'], 'customers');
+                if ($newImg !== '') {
+                    if ($img !== '') ImageUpload::delete($img);
+                    $img = $newImg;
+                }
+            }
+
+            // ===== VALIDATION =====
             if ($u === '' || $em === '') {
-                $message = 'Punan lahat ng fields!';
+                $message = 'Punan ang username at email!';
+                $message_type = 'error';
+            } elseif (!filter_var($em, FILTER_VALIDATE_EMAIL)) {
+                $message = 'Hindi valid ang email format.';
+                $message_type = 'error';
+            } elseif ($model->existsExcept($u, $em, $id)) {
+                $message = 'Ginamit na ang username o email ng ibang user.';
+                $message_type = 'error';
+            } elseif ($changePass && $newPw !== $confPw) {
+                $message = 'Hindi nagtutugma ang bagong password at confirm password!';
+                $message_type = 'error';
+            } elseif ($changePass && strlen($newPw) < 6) {
+                $message = 'Dapat 6+ characters ang bagong password.';
                 $message_type = 'error';
             } else {
-                $ok = $model->update($id, ['username'=>$u, 'email'=>$em, 'role'=>$r]);
-                if ($ok) {
+                // ===== UPDATE PROFILE =====
+                $ok = $model->update($id, [
+                    'username'      => $u,
+                    'email'         => $em,
+                    'role'          => $r,
+                    'full_name'     => $fullNm,
+                    'address'       => $addr,
+                    'profile_image' => $img,
+                ]);
+
+                // ===== UPDATE PASSWORD (kung may binago) =====
+                $passOk = true;
+                if ($ok && $changePass) {
+                    $passOk = $model->updatePasswordById(
+                        $id,
+                        password_hash($newPw, PASSWORD_DEFAULT)
+                    );
+                }
+
+                if ($ok && $passOk) {
                     if ($id === (int)$current['id']) {
                         $_SESSION['username'] = $u;
                         $_SESSION['email']    = $em;
                         $_SESSION['role']     = $r;
                     }
-                    toast('YEHEYY!! Account updated!', 'success');
+                    $msg = $changePass
+                        ? 'YEHEYY!! Profile + password updated!'
+                        : 'YEHEYY!! Profile updated!';
+                    toast($msg, 'success');
                     $this->redirect('/users/edit_user.php?id=' . $id);
                 }
-                $message = 'Update failed!';
+                $message = $passOk ? 'Update failed!' : 'Password update failed!';
                 $message_type = 'error';
             }
             $user = $model->find($id);
         }
 
         $this->view('auth/edit', [
-            'title' => 'Edit User',
-            'bg' => '/Mario Wallpaper/mario-super-mario-bros-3-wallpaper-preview.jpg',
-            'user' => $user,
-            'is_admin' => $isAdmin,
-            'message' => $message,
+            'title'        => 'Edit User',
+            'bg'           => '/Mario Wallpaper/mario-super-mario-bros-3-wallpaper-preview.jpg',
+            'user'         => $user,
+            'is_admin'     => $isAdmin,
+            'message'      => $message,
             'message_type' => $message_type,
         ]);
     }
@@ -358,10 +425,6 @@ class AuthController extends Controller
             toast('Naka-logout ka na. Bye!', 'info');
             $this->redirect('/users/login.php');
         }
-        Auth::requireLogin();
-        $this->view('auth/logout', [
-            'title' => 'Logout',
-            'bg' => '/Mario Wallpaper/NSMBUMushroomKingdom.png',
-        ]);
+        $this->redirect('/index.php');
     }
 }

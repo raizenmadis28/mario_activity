@@ -1,15 +1,26 @@
-# DDEV local config (per-machine)
+# DDEV — local per-machine config
 .ddev/
 
-# Danger — contains DROP TABLE
+# DANGER files — never commit
 reset_db.php
 
-# User uploads (uncomment kung ayaw mo i-track)
-# uploads/*
-
-# OS/IDE junk
+# OS / IDE junk
 .DS_Store
 Thumbs.db
+desktop.ini
 .vscode/
 .idea/
 *.log
+*.tmp
+
+# Legacy uploads (root level — hindi na ginagamit ng MVC)
+uploads/*.png
+uploads/*.jpg
+uploads/*.jpeg
+uploads/*.webp
+uploads/*.gif
+
+# Keep subfolder structure
+!uploads/customers/
+!uploads/inventory/
+!uploads/products/

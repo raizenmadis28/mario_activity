@@ -3,53 +3,53 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Auth;
+use App\Models\Product;
 use App\Models\Inventory;
 
 class InventoryController extends Controller
 {
     public function index(): void
     {
-        Auth::requireLogin();
-        $model = new Inventory();
+        Auth::requireAdmin('/index.php');
 
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $n   = trim($_POST['product_name'] ?? '');
-            $pr  = (float)($_POST['product_price'] ?? 0);
-            $cat = trim($_POST['category'] ?? '');
-            $sub = trim($_POST['subcategory'] ?? '');
-            $det = trim($_POST['product_details'] ?? '');
-            $img = '';
+        $productModel = new Product();
+        $invModel = new Inventory();
 
-            if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
-                $dir = __DIR__ . '/../../uploads';
-                if (!is_dir($dir)) mkdir($dir, 0777, true);
-                $img = 'uploads/' . time() . '_' . basename($_FILES['photo']['name']);
-                move_uploaded_file($_FILES['photo']['tmp_name'], __DIR__ . '/../../' . $img);
-            }
+        $products = $productModel->all('id DESC');
 
-            if ($n === '' || $pr <= 0) {
-                toast('OHHH MAAAAMAAAMIAA!!! Punan ang name at price!', 'error');
-            } else {
-                $ok = $model->create([
-                    'product_name' => $n, 'product_price' => $pr,
-                    'category' => $cat, 'subcategory' => $sub,
-                    'product_details' => $det, 'photo' => $img,
-                ]);
-                toast($ok ? 'Inventory item added!' : 'Error: ' . $model->db()->error, $ok ? 'success' : 'error');
-            }
-            $this->redirect('/admin/inventory_list.php');
+        // Stats
+        $totalProducts = count($products);
+        $totalStock    = 0;
+        $lowStock      = [];
+        $outOfStock    = [];
+        $totalValue    = 0.0;
+
+        foreach ($products as $p) {
+            $stock = (int)$p['stock'];
+            $totalStock += $stock;
+            $totalValue += (float)$p['price'] * $stock;
+            if ($stock === 0) $outOfStock[] = $p;
+            elseif ($stock < 5) $lowStock[] = $p;
         }
 
-        if (isset($_GET['delete'])) {
-            $ok = $model->delete((int)$_GET['delete']);
-            toast($ok ? 'Item deleted.' : 'Error sa delete.', $ok ? 'success' : 'error');
-            $this->redirect('/admin/inventory_list.php');
-        }
+        $filter = $_GET['filter'] ?? 'all';
+        if ($filter === 'low')      $display = $lowStock;
+        elseif ($filter === 'out')  $display = $outOfStock;
+        else                        $display = $products;
 
         $this->view('admin/inventory_list', [
-            'title' => 'Inventory',
-            'bg'    => '/Mario Wallpaper/Power-up Panels.png',
-            'rows'  => $model->all('id DESC'),
+            'title'          => 'Inventory Monitoring',
+            'bg'             => '/Mario Wallpaper/Power-up Panels.png',
+            'rows'           => $display,
+            'filter'         => $filter,
+            'total_products' => $totalProducts,
+            'total_stock'    => $totalStock,
+            'total_value'    => $totalValue,
+            'low_count'      => count($lowStock),
+            'out_count'      => count($outOfStock),
+            'total_in'       => $invModel->totalIn(),
+            'total_out'      => $invModel->totalOut(),
+            'history'        => $invModel->allWithUser(),
         ]);
     }
 }
