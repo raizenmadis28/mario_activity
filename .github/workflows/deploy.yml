@@ -21,14 +21,15 @@ jobs:
         port: 21
         protocol: ftp
         
-        # ⏱️ 1 ORAS NA TIMEOUT (3,600,000 milliseconds)
-        # Para kahit gaano kabagal, hindi maiiwan / mapuputol
+        # 1 hour timeout para hindi mag ECONNRESET
         timeout: 3600000 
         
         local-dir: ./
-        server-dir: /public_html/
         
-        # I-e-exclude lang ang mga system files, LAHAT ng images at code isasama
+        # 🚨 ITO ANG FIX: / lang, hindi /public_html/ 
+        server-dir: / 
+        
+        # I-exclude lang ang system files. Lahat ng images isasama.
         exclude: |
           **/.git*
           **/.git*/**
